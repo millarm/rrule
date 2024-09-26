@@ -1,24 +1,29 @@
-import { expect } from 'chai'
-import { ExclusiveTestFunction, TestFunction } from 'mocha'
+export { datetime } from '../../src/dateutil'
+import { dateInTimeZone, datetime } from '../../src/dateutil'
 import { RRule, RRuleSet } from '../../src'
-import { DateTime } from 'luxon';
 
-const assertDatesEqual = function (actual: Date | Date[], expected: Date | Date[], msg?: string) {
-  msg = msg ? ' [' + msg + '] ' : ''
+export const TEST_CTX = {
+  ALSO_TESTSTRING_FUNCTIONS: false,
+  ALSO_TESTNLP_FUNCTIONS: false,
+  ALSO_TESTBEFORE_AFTER_BETWEEN: false,
+  ALSO_TESTSUBSECOND_PRECISION: false,
+}
 
+const assertDatesEqual = function (
+  actual: Date | Date[],
+  expected: Date | Date[]
+) {
   if (!(actual instanceof Array)) actual = [actual]
   if (!(expected instanceof Array)) expected = [expected]
 
   if (expected.length > 1) {
-    expect(actual).to.have.length(expected.length, msg + 'number of recurrences')
-    msg = ' - '
+    expect(actual).toHaveLength(expected.length)
   }
 
   for (let i = 0; i < expected.length; i++) {
     const act = actual[i]
     const exp = expected[i]
-    expect(exp instanceof Date ? exp.toString() : exp).to.equal(
-      act.toString(), msg + (i + 1) + '/' + expected.length)
+    expect(exp instanceof Date ? exp.toString() : exp).toBe(act.toString())
   }
 }
 
@@ -27,46 +32,41 @@ const extractTime = function (date: Date) {
 }
 
 /**
- * datetime.datetime
- */
-export const datetime = function (y: number, m: number, d: number, h: number = 0, i: number = 0, s: number = 0) {
-  return new Date(Date.UTC(y, m - 1, d, h, i, s))
-}
-
-export const datetimeUTC = function (y: number, m: number, d: number, h: number = 0, i: number = 0, s: number = 0) {
-  return new Date(Date.UTC(y, m - 1, d, h, i, s))
-}
-
-/**
  * dateutil.parser.parse
  */
 export const parse = function (str: string) {
   const parts = str.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/)
-  let [ _, y, m, d, h, i, s ] = parts
+  const [, y, m, d, h, i, s] = parts
   const year = Number(y)
-  const month = Number(m[0] === '0' ? m[1] : m) - 1
+  const month = Number(m[0] === '0' ? m[1] : m)
   const day = Number(d[0] === '0' ? d[1] : d)
   const hour = Number(h[0] === '0' ? h[1] : h)
   const minute = Number(i[0] === '0' ? i[1] : i)
   const second = Number(s[0] === '0' ? s[1] : s)
-  return new Date(Date.UTC(year, month, day, hour, minute, second))
+  return datetime(year, month, day, hour, minute, second)
 }
 
 interface TestRecurring {
-  (m: string, testObj: any, expectedDates: Date | Date[]): void
-  only: (...args: any[]) => void
-  skip: (...args: any[]) => void
+  (m: string, testObj: unknown, expectedDates: Date | Date[]): void
+  only: (...args: unknown[]) => void
+  skip: (...args: unknown[]) => void
+}
+
+interface TestObj {
+  rrule: RRule
+  method: 'all' | 'between' | 'before' | 'after'
+  args: unknown[]
 }
 
 export const testRecurring = function (
   msg: string,
-  testObj: any,
+  testObj: TestObj | RRule | (() => TestObj),
   expectedDates: Date | Date[],
-  itFunc: TestFunction | ExclusiveTestFunction = it,
+  itFunc: jest.Func = it
 ) {
-  let rule: any
-  let method: string
-  let args: any
+  let rule: RRule
+  let method: 'all' | 'before' | 'between' | 'after'
+  let args: unknown[]
 
   if (typeof testObj === 'function') {
     testObj = testObj()
@@ -79,27 +79,34 @@ export const testRecurring = function (
   } else {
     rule = testObj.rrule
     method = testObj.method
-    args = testObj.args
+    args = testObj.args ?? []
   }
 
   // Use text and string representation of the rrule as the message.
   if (rule instanceof RRule) {
-    msg = msg + ' [' +
+    msg =
+      msg +
+      ' [' +
       (rule.isFullyConvertibleToText() ? rule.toText() : 'no text repr') +
-      ']' + ' [' + rule.toString() + ']'
+      ']' +
+      ' [' +
+      rule.toString() +
+      ']'
   } else {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
     msg = msg + ' ' + rule.toString()
   }
 
   itFunc(msg, function () {
-    const ctx = this.test.ctx
     let time = Date.now()
-    let actualDates = rule[method].apply(rule, args)
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    let actualDates = rule[method](...args)
     time = Date.now() - time
 
     const maxTestDuration = 200
-    expect(time).to.be.lessThan(maxTestDuration,
-      `${rule}\' method "${method}" should finish in ${maxTestDuration} ms, but took ${time} ms`)
+    expect(time).toBeLessThan(maxTestDuration)
 
     if (!(actualDates instanceof Array)) actualDates = [actualDates]
     if (!(expectedDates instanceof Array)) expectedDates = [expectedDates]
@@ -109,35 +116,45 @@ export const testRecurring = function (
     // Additional tests using the expected dates
     // ==========================================================
 
-    if (ctx.ALSO_TEST_SUBSECOND_PRECISION) {
-      expect(actualDates.map(extractTime)).to.deep.equal(expectedDates.map(extractTime))
+    if (TEST_CTX.ALSO_TESTSUBSECOND_PRECISION) {
+      expect(actualDates.map(extractTime)).toEqual(
+        expectedDates.map(extractTime)
+      )
     }
 
-    if (ctx.ALSO_TEST_STRING_FUNCTIONS) {
+    if (TEST_CTX.ALSO_TESTSTRING_FUNCTIONS) {
       // Test toString()/fromString()
       const str = rule.toString()
       const rrule2 = RRule.fromString(str)
       const string2 = rrule2.toString()
-      expect(str).to.equal(string2, 'toString() == fromString(toString()).toString()')
+      expect(str).toBe(string2)
       if (method === 'all') {
-        assertDatesEqual(rrule2.all(), expectedDates, 'fromString().all()')
+        assertDatesEqual(rrule2.all(), expectedDates)
       }
     }
 
-    if (ctx.ALSO_TEST_NLP_FUNCTIONS && rule.isFullyConvertibleToText && rule.isFullyConvertibleToText()) {
+    if (
+      TEST_CTX.ALSO_TESTNLP_FUNCTIONS &&
+      rule.isFullyConvertibleToText &&
+      rule.isFullyConvertibleToText()
+    ) {
       // Test fromText()/toText().
       const str = rule.toString()
       const text = rule.toText()
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
       const rrule2 = RRule.fromText(text, rule.options.dtstart)
       const text2 = rrule2.toText()
-      expect(text2).to.equal(text, 'toText() == fromText(toText()).toText()')
+      expect(text2).toBe(text)
 
       // Test fromText()/toString().
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
       const rrule3 = RRule.fromText(text, rule.options.dtstart)
-      expect(rrule3.toString()).to.equal(str, 'toString() == fromText(toText()).toString()')
+      expect(rrule3.toString()).toBe(str)
     }
 
-    if (method === 'all' && ctx.ALSO_TEST_BEFORE_AFTER_BETWEEN) {
+    if (method === 'all' && TEST_CTX.ALSO_TESTBEFORE_AFTER_BETWEEN) {
       // Test before, after, and between - use the expected dates.
       // create a clean copy of the rrule object to bypass caching
       rule = rule.clone()
@@ -150,8 +167,7 @@ export const testRecurring = function (
             expectedDates[expectedDates.length - 1],
             true
           ),
-          expectedDates,
-          'between, inc=true'
+          expectedDates
         )
 
         assertDatesEqual(
@@ -160,8 +176,7 @@ export const testRecurring = function (
             expectedDates[expectedDates.length - 1],
             false
           ),
-          expectedDates.slice(1, expectedDates.length - 1),
-          'between, inc=false'
+          expectedDates.slice(1, expectedDates.length - 1)
         )
       }
 
@@ -175,12 +190,12 @@ export const testRecurring = function (
           prev = expectedDates[i - 1]
 
           // Test after() and before() with inc=true.
-          assertDatesEqual(rule.after(date, true), date, 'after, inc=true')
-          assertDatesEqual(rule.before(date, true), date, 'before, inc=true')
+          assertDatesEqual(rule.after(date, true), date)
+          assertDatesEqual(rule.before(date, true), date)
 
           // Test after() and before() with inc=false.
-          next && assertDatesEqual(rule.after(date, false), next, 'after, inc=false')
-          prev && assertDatesEqual(rule.before(date, false), prev, 'before, inc=false')
+          next && assertDatesEqual(rule.after(date, false), next)
+          prev && assertDatesEqual(rule.before(date, false), prev)
         }
       }
     }
@@ -191,19 +206,15 @@ testRecurring.only = function (...args) {
   testRecurring.apply(it, [...args, it.only])
 }
 
-testRecurring.skip = function () {
-  it.skip.apply(it, arguments)
+testRecurring.skip = function ([description]: [string]) {
+  // eslint-disable-next-line @typescript-eslint/no-empty-function, no-empty-function
+  it.skip(description, () => {})
 }
 
-export function expectedDate(startDate: DateTime, currentLocalDate: DateTime, targetZone: string): Date {
-  const targetOffset = startDate.setZone(targetZone).offset
-  const { zoneName: systemZone } = currentLocalDate
-  const {
-    offset: systemOffset,
-  } = startDate.setZone(systemZone)
-
-  const netOffset = targetOffset - systemOffset
-  const hours = -((netOffset / 60) % 24)
-  const minutes = -(netOffset % 60)
-  return startDate.plus({ hours, minutes }).toJSDate()
+export function expectedDate(
+  startDate: Date,
+  currentLocalDate: Date,
+  targetZone: string
+): Date {
+  return dateInTimeZone(startDate, targetZone)
 }
